@@ -94,12 +94,43 @@
 
   /* Chart panels */
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  @media(max-width:760px){.grid{grid-template-columns:1fr} header{position:static}}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  /* ---- Mobile optimization ---- */
+  @media(max-width:600px){
+    .wrap{padding:0 12px 50px}
+    header{position:sticky;padding:12px 0;gap:8px}
+    h1{font-size:24px}
+    .sub{font-size:9.5px;letter-spacing:1.2px;margin-top:2px}
+    .hstat{gap:10px}
+    .status{font-size:10px;max-width:150px}
+    .sync{padding:8px 14px;font-size:12px}
+    .cards{grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:12px}
+    .card{padding:13px 12px;border-radius:13px}
+    .card .label{font-size:9.5px;letter-spacing:1.2px}
+    .card .value{font-size:23px;margin-top:7px}
+    .card .unit{font-size:10.5px}
+    .card .delta{font-size:10px;margin-top:6px}
+    .card::after{top:10px;right:10px;width:5px;height:5px}
+    .panel{padding:14px;border-radius:13px}
+    .panel h2{font-size:10.5px;letter-spacing:1.3px;margin-bottom:10px;flex-wrap:wrap}
+    .panel h2 .target{font-size:9.5px;width:100%;margin-left:16px;margin-top:2px}
+    .panel .chartbox{height:185px}
+    .insights-body{font-size:13.5px;line-height:1.6}
+    .toolbar{justify-content:center}
+    .ranges{width:100%;justify-content:space-between}
+    .ranges button{flex:1;padding:7px 0;font-size:12px}
+    footer{font-size:9.5px}
+  }
+  @media(max-width:380px){
+    .cards{grid-template-columns:1fr 1fr}
+    .card .value{font-size:20px}
+  }
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;
     backdrop-filter:blur(8px);transition:border-color .2s}
   .panel:hover{border-color:var(--line2)}
   .panel h2{font-size:11.5px;letter-spacing:1.8px;text-transform:uppercase;color:var(--dim);
     font-weight:500;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  .panel h2 .target{color:#FFD60A;font-weight:400;text-transform:none;letter-spacing:.5px;font-size:11px}
   .panel h2::before{content:"";width:8px;height:8px;background:var(--red);display:inline-block;flex:none}
   .panel .chartbox{position:relative;height:225px}
   #err{color:var(--red2);font-size:13px;margin-bottom:16px;display:none;background:rgba(215,25,33,.08);
@@ -155,9 +186,21 @@ const SECRET = 'DharmHealthTrackAPI';
 const GEMINI_API_KEY = 'AQ.Ab8RN6KqnKJrtRoabGG78TN-gbOuTVdJTEBYAkwTyMP3rVrSpA';
 // Tried in order — first one that works is remembered for the session
 const GEMINI_MODELS = ['gemini-3.5-flash','gemini-3-flash','gemini-3.1-flash-lite','gemini-2.5-flash'];
+/* ---- Benchmarks (yellow lines) — tune to your goals ---- */
+const BENCH = {
+  steps: 8000,      // WHO: ~8k steps/day for adults (India avg is ~4-5k — you're aiming higher)
+  rhr: 60,          // good-fitness resting HR for adult men
+  sleep: 7,         // minimum recommended night sleep (7-9h)
+  spo2: 95,         // healthy SpO2 floor
+  cal: 400,         // active kcal/day ≈ WHO 150-300 min/wk moderate activity
+  water: 3.0,       // ICMR-NIN: ~3L/day for adult men in Indian climate
+  bmi: 22.5         // mid healthy BMI -> ideal weight uses your height
+};
+const YEL = '#FFD60A';
 /* ================================ */
 
 const $ = s => document.querySelector(s);
+const MOBILE = matchMedia('(max-width:600px)').matches;
 const EPOCH = new Date(1970,0,1);
 const dayToDate = d => { const t = new Date(EPOCH); t.setDate(t.getDate()+d); return t; };
 const fmt = d => d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
@@ -225,10 +268,12 @@ async function parseDb(buf){
   }
 
   const weight = q("SELECT local_date, ROUND(weight/1000.0,1) FROM weight_record_table GROUP BY local_date ORDER BY local_date");
+  const hRow = q("SELECT height FROM height_record_table LIMIT 1");
+  const heightM = hRow.length ? (hRow[0][0] > 3 ? hRow[0][0]/100 : hRow[0][0]) : null; // cm or m
 
   db.close();
   if(!steps.length && !rhr.length) throw new Error("No Health Connect data found in export.");
-  return { steps, rhr, spo2, cal, sleep, stages, hr, hyd, weight, exported: Date.now() };
+  return { steps, rhr, spo2, cal, sleep, stages, hr, hyd, weight, heightM, exported: Date.now() };
 }
 
 /* ---------- Fetch from Apps Script ---------- */
@@ -319,18 +364,23 @@ function render(){
 
 function buildPanels(){
   let html = `
-    <div class="panel"><h2>Steps / day</h2><div class="chartbox"><canvas id="cSteps"></canvas></div></div>
-    <div class="panel"><h2>Resting heart rate</h2><div class="chartbox"><canvas id="cRhr"></canvas></div></div>
-    <div class="panel"><h2>Night sleep (hours)</h2><div class="chartbox"><canvas id="cSleep"></canvas></div></div>
+    <div class="panel"><h2>Steps / day <span class="target">— target ${BENCH.steps.toLocaleString()}</span></h2><div class="chartbox"><canvas id="cSteps"></canvas></div></div>
+    <div class="panel"><h2>Resting heart rate <span class="target">— ideal ≤ ${BENCH.rhr}</span></h2><div class="chartbox"><canvas id="cRhr"></canvas></div></div>
+    <div class="panel"><h2>Night sleep (hours) <span class="target">— min ${BENCH.sleep}h</span></h2><div class="chartbox"><canvas id="cSleep"></canvas></div></div>
     <div class="panel"><h2>Sleep stages · last 30d</h2><div class="chartbox"><canvas id="cStages"></canvas></div></div>
-    <div class="panel"><h2>Heart rate range / day</h2><div class="chartbox"><canvas id="cHr"></canvas></div></div>
-    <div class="panel"><h2>Active calories</h2><div class="chartbox"><canvas id="cCal"></canvas></div></div>
-    <div class="panel"><h2>Blood oxygen (SpO2)</h2><div class="chartbox"><canvas id="cSpo2"></canvas></div></div>`;
+    <div class="panel"><h2>Heart rate range / day <span class="target">— resting ideal ${BENCH.rhr}</span></h2><div class="chartbox"><canvas id="cHr"></canvas></div></div>
+    <div class="panel"><h2>Active calories <span class="target">— target ${BENCH.cal}</span></h2><div class="chartbox"><canvas id="cCal"></canvas></div></div>
+    <div class="panel"><h2>Blood oxygen (SpO2) <span class="target">— healthy ≥ ${BENCH.spo2}%</span></h2><div class="chartbox"><canvas id="cSpo2"></canvas></div></div>`;
   if(DATA.hyd && DATA.hyd.length)
-    html += `<div class="panel"><h2>Water intake (L)</h2><div class="chartbox"><canvas id="cHyd"></canvas></div></div>`;
+    html += `<div class="panel"><h2>Water intake (L) <span class="target">— target ${BENCH.water}L</span></h2><div class="chartbox"><canvas id="cHyd"></canvas></div></div>`;
   if(DATA.weight && DATA.weight.length > 1)
-    html += `<div class="panel"><h2>Weight (kg)</h2><div class="chartbox"><canvas id="cWeight"></canvas></div></div>`;
+    html += `<div class="panel"><h2>Weight (kg) <span class="target">${DATA.heightM?`— ideal ~${(BENCH.bmi*DATA.heightM*DATA.heightM).toFixed(0)}kg`:''}</span></h2><div class="chartbox"><canvas id="cWeight"></canvas></div></div>`;
   $('#chartGrid').innerHTML = html;
+}
+
+function bench(n, v){
+  return {type:'line', label:'Benchmark', data:Array(n).fill(v), borderColor:YEL,
+    borderWidth:2, borderDash:[7,5], pointRadius:0, tension:0, fill:false, order:-1};
 }
 
 function grad(ctx, rgba){
@@ -346,19 +396,23 @@ function drawCharts(){
   const st=slice(DATA.steps), rh=slice(DATA.rhr), sl=slice(DATA.sleep), sp=slice(DATA.spo2),
         ca=slice(DATA.cal), hrr=slice(DATA.hr), hy=slice(DATA.hyd), wt=slice(DATA.weight);
   const common = {responsive:true,maintainAspectRatio:false,
-    plugins:{legend:{display:false},tooltip:{backgroundColor:'#1A1A1A',borderColor:'#333',borderWidth:1,padding:10,cornerRadius:8}},
-    scales:{x:{grid:{display:false},ticks:{maxTicksLimit:8}},y:{grid:{color:'#1B1B1B'},border:{display:false}}},
+    plugins:{legend:{display:false},tooltip:{backgroundColor:'#1A1A1A',borderColor:'#333',borderWidth:1,padding:10,cornerRadius:8,
+      filter:i=>i.dataset.label!=='Benchmark'}},
+    scales:{x:{grid:{display:false},ticks:{maxTicksLimit:MOBILE?5:8,font:{size:MOBILE?9.5:11}}},y:{grid:{color:'#1B1B1B'},border:{display:false},ticks:{font:{size:MOBILE?9.5:11},maxTicksLimit:MOBILE?5:8}}},
     animation:{duration:600,easing:'easeOutQuart'}};
 
-  mk('#cSteps',{type:'bar',data:{labels:labels(st),datasets:[{data:vals(st),
-    backgroundColor:vals(st).map(v=>v>=10000?'#D71921':'#EDEDED'),borderRadius:5,barPercentage:.68}]},options:common});
+  mk('#cSteps',{type:'bar',data:{labels:labels(st),datasets:[
+    {data:vals(st),backgroundColor:vals(st).map(v=>v>=BENCH.steps?'#D71921':'#EDEDED'),borderRadius:5,barPercentage:.68},
+    bench(st.length, BENCH.steps)]},options:common});
 
-  mk('#cRhr',{type:'line',data:{labels:labels(rh),datasets:[{data:vals(rh),borderColor:'#FF3B3B',
-    pointBackgroundColor:'#FF3B3B',pointRadius:2.5,tension:.4,borderWidth:2.5,fill:true,
-    backgroundColor:c=>grad(c.chart.ctx,'rgba(215,25,33,.18)')}]},options:common});
+  mk('#cRhr',{type:'line',data:{labels:labels(rh),datasets:[
+    {data:vals(rh),borderColor:'#FF3B3B',pointBackgroundColor:'#FF3B3B',pointRadius:2.5,tension:.4,borderWidth:2.5,fill:true,
+     backgroundColor:c=>grad(c.chart.ctx,'rgba(215,25,33,.18)')},
+    bench(rh.length, BENCH.rhr)]},options:common});
 
-  mk('#cSleep',{type:'bar',data:{labels:labels(sl),datasets:[{data:vals(sl),
-    backgroundColor:vals(sl).map(v=>v>=7?'#EDEDED':'#D71921'),borderRadius:5,barPercentage:.68}]},
+  mk('#cSleep',{type:'bar',data:{labels:labels(sl),datasets:[
+    {data:vals(sl),backgroundColor:vals(sl).map(v=>v>=BENCH.sleep?'#EDEDED':'#D71921'),borderRadius:5,barPercentage:.68},
+    bench(sl.length, BENCH.sleep)]},
     options:{...common,scales:{...common.scales,y:{...common.scales.y,suggestedMax:9}}}});
 
   const sg = DATA.stages;
@@ -366,7 +420,7 @@ function drawCharts(){
     datasets:[{data:[sg.Light,sg.Deep,sg.REM,sg.Awake].map(v=>+v.toFixed(1)),
     backgroundColor:['#EDEDED','#D71921','#8C8C8C','#353535'],borderColor:'#161616',borderWidth:4,hoverOffset:6}]},
     options:{responsive:true,maintainAspectRatio:false,cutout:'66%',
-      plugins:{legend:{display:true,position:'right',labels:{boxWidth:10,padding:12,
+      plugins:{legend:{display:true,position:MOBILE?'bottom':'right',labels:{boxWidth:10,padding:MOBILE?8:12,font:{size:MOBILE?10:11},
         generateLabels(c){const d=c.data;const tot=d.datasets[0].data.reduce((a,b)=>a+b,0)||1;
           return d.labels.map((l,i)=>({text:`${l} ${(d.datasets[0].data[i]/tot*100).toFixed(0)}%`,
             fillStyle:d.datasets[0].backgroundColor[i],strokeStyle:'transparent',index:i}));}}},
@@ -375,20 +429,28 @@ function drawCharts(){
   mk('#cHr',{type:'line',data:{labels:hrr.map(([d])=>fmt(dayToDate(d))),datasets:[
     {label:'Max',data:hrr.map(r=>r[3]),borderColor:'rgba(255,59,59,.9)',pointRadius:0,tension:.35,borderWidth:1.5,fill:'+2',backgroundColor:'rgba(215,25,33,.09)'},
     {label:'Avg',data:hrr.map(r=>r[2]),borderColor:'#EDEDED',pointRadius:0,tension:.35,borderWidth:2.5},
-    {label:'Min',data:hrr.map(r=>r[1]),borderColor:'#555',pointRadius:0,tension:.35,borderWidth:1.5}]},
-    options:{...common,plugins:{...common.plugins,legend:{display:true,labels:{boxWidth:10,usePointStyle:true,pointStyle:'line'}}}}});
+    {label:'Min',data:hrr.map(r=>r[1]),borderColor:'#555',pointRadius:0,tension:.35,borderWidth:1.5},
+    bench(hrr.length, BENCH.rhr)]},
+    options:{...common,plugins:{...common.plugins,legend:{display:true,labels:{boxWidth:10,usePointStyle:true,pointStyle:'line',font:{size:MOBILE?9.5:11}}}}}});
 
-  mk('#cCal',{type:'bar',data:{labels:labels(ca),datasets:[{data:vals(ca),
-    backgroundColor:'#EDEDED',borderRadius:5,barPercentage:.68}]},options:common});
+  mk('#cCal',{type:'bar',data:{labels:labels(ca),datasets:[
+    {data:vals(ca),backgroundColor:vals(ca).map(v=>v>=BENCH.cal?'#D71921':'#EDEDED'),borderRadius:5,barPercentage:.68},
+    bench(ca.length, BENCH.cal)]},options:common});
 
-  mk('#cSpo2',{type:'line',data:{labels:labels(sp),datasets:[{data:vals(sp),borderColor:'#EDEDED',
-    pointRadius:2,tension:.35,borderWidth:2.5,fill:true,backgroundColor:c=>grad(c.chart.ctx,'rgba(255,255,255,.08)')}]},
-    options:{...common,scales:{...common.scales,y:{...common.scales.y,suggestedMin:94,suggestedMax:100}}}});
+  mk('#cSpo2',{type:'line',data:{labels:labels(sp),datasets:[
+    {data:vals(sp),borderColor:'#EDEDED',pointRadius:2,tension:.35,borderWidth:2.5,fill:true,
+     backgroundColor:c=>grad(c.chart.ctx,'rgba(255,255,255,.08)')},
+    bench(sp.length, BENCH.spo2)]},
+    options:{...common,scales:{...common.scales,y:{...common.scales.y,suggestedMin:93,suggestedMax:100}}}});
 
-  if(hy.length) mk('#cHyd',{type:'bar',data:{labels:labels(hy),datasets:[{data:vals(hy),
-    backgroundColor:'#EDEDED',borderRadius:5,barPercentage:.68}]},options:common});
-  if(wt.length>1) mk('#cWeight',{type:'line',data:{labels:labels(wt),datasets:[{data:vals(wt),
-    borderColor:'#FF3B3B',pointRadius:2.5,tension:.35,borderWidth:2.5}]},options:common});
+  if(hy.length) mk('#cHyd',{type:'bar',data:{labels:labels(hy),datasets:[
+    {data:vals(hy),backgroundColor:'#EDEDED',borderRadius:5,barPercentage:.68},
+    bench(hy.length, BENCH.water)]},options:common});
+  if(wt.length>1){
+    const ds = [{data:vals(wt),borderColor:'#FF3B3B',pointRadius:2.5,tension:.35,borderWidth:2.5}];
+    if(DATA.heightM) ds.push(bench(wt.length, +(BENCH.bmi*DATA.heightM*DATA.heightM).toFixed(1)));
+    mk('#cWeight',{type:'line',data:{labels:labels(wt),datasets:ds},options:common});
+  }
 }
 
 /* ---------- Gemini AI insights (latest models + fallback) ---------- */
@@ -447,14 +509,18 @@ async function loadInsights(force){
   }
   box.textContent = 'Analyzing your week…';
   const prompt = `You are a concise health coach. My wearable data summary (JSON): ${JSON.stringify(summaryForAI())}.
-Give exactly 4 short insights comparing this week vs the 30-day baseline (steps, sleep incl. stage quality, heart, activity/calories) and 1 specific actionable suggestion for tomorrow. Under 130 words total. Plain text, one line per point, each starting with "• ". No medical diagnoses.`;
+My targets: ${JSON.stringify(BENCH)} (steps/day, resting HR bpm, sleep h, SpO2 %, active kcal, water L, healthy BMI).
+Give exactly 4 short insights comparing this week vs the 30-day baseline AND vs my targets (steps, sleep incl. stage quality, heart, activity/calories) and 1 specific actionable suggestion for tomorrow. Under 130 words total. Plain text, one line per point, each starting with "• ". No medical diagnoses.`;
   try{
     const text = await callGemini(prompt);
     const html = text.replace(/</g,'&lt;').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
     box.innerHTML = html;
     await store.set(cacheKey, html);
   }catch(e){
-    box.textContent = 'Insights unavailable: ' + e.message;
+    let msg = e.message;
+    if(/OAuth|authentication credential/i.test(msg))
+      msg = 'Invalid API key — Gemini keys start with "AIza". Get one free: aistudio.google.com → Get API key.';
+    box.textContent = 'Insights unavailable: ' + msg;
   }
 }
 
