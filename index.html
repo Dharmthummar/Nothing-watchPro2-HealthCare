@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D's Health — Nothing Watch Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Doto:wght@600;900&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0A0A0A; --panel:#141414; --line:#262626;
+    --text:#F2F2F2; --dim:#8A8A8A; --red:#D71921; --white:#FFFFFF;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:'Space Grotesk',system-ui,sans-serif;
+    min-height:100vh;
+    background-image:radial-gradient(circle, #1C1C1C 1px, transparent 1px);
+    background-size:22px 22px;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 60px}
+  header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;
+    border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:24px}
+  h1{font-family:'Doto',monospace;font-weight:900;font-size:clamp(30px,6vw,52px);letter-spacing:2px;line-height:1}
+  h1 .dot{color:var(--red)}
+  .sub{color:var(--dim);font-size:13px;letter-spacing:1.5px;text-transform:uppercase;margin-top:6px}
+  .status{font-size:12px;color:var(--dim);text-align:right}
+  .status b{color:var(--text);font-weight:500}
+
+  /* Drop zone */
+  #drop{
+    border:1px dashed var(--line); border-radius:14px; padding:34px 20px; text-align:center;
+    cursor:pointer; transition:border-color .2s, background .2s; margin-bottom:26px;
+  }
+  #drop:hover, #drop.over{border-color:var(--red); background:rgba(215,25,33,.05)}
+  #drop .big{font-family:'Doto',monospace;font-weight:600;font-size:18px;letter-spacing:1px}
+  #drop .hint{color:var(--dim);font-size:13px;margin-top:8px}
+  #drop.compact{padding:14px;margin-bottom:20px}
+  #drop.compact .hint{display:inline;margin-left:8px}
+  #drop.compact .big{display:inline;font-size:14px}
+  input[type=file]{display:none}
+
+  /* Stat cards */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:26px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 16px;position:relative;overflow:hidden}
+  .card .label{font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:var(--dim)}
+  .card .value{font-family:'Doto',monospace;font-weight:900;font-size:34px;margin-top:8px;line-height:1}
+  .card .unit{font-size:12px;color:var(--dim);font-family:'Space Grotesk';font-weight:400;margin-left:4px}
+  .card .delta{font-size:12px;margin-top:8px;color:var(--dim)}
+  .card .delta.up{color:#4CAF6E}.card .delta.down{color:var(--red)}
+  .card::after{content:"";position:absolute;top:0;right:0;width:6px;height:6px;border-radius:50%;background:var(--red);margin:12px}
+
+  /* Range toggle */
+  .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px}
+  .ranges{display:flex;gap:6px}
+  .ranges button{
+    background:transparent;border:1px solid var(--line);color:var(--dim);border-radius:999px;
+    padding:6px 16px;font-family:inherit;font-size:13px;cursor:pointer;transition:all .15s
+  }
+  .ranges button.active{background:var(--white);color:#000;border-color:var(--white)}
+  .ranges button:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+  .clear{background:none;border:none;color:var(--dim);font-size:12px;cursor:pointer;text-decoration:underline;font-family:inherit}
+
+  /* Chart panels */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .panel h2{font-size:12px;letter-spacing:1.6px;text-transform:uppercase;color:var(--dim);font-weight:500;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  .panel h2::before{content:"";width:8px;height:8px;background:var(--red);display:inline-block}
+  .panel .chartbox{position:relative;height:220px}
+  .empty{color:var(--dim);text-align:center;padding:60px 0;font-size:14px}
+  #err{color:var(--red);font-size:13px;margin-bottom:16px;display:none}
+  .panel.insights{margin-bottom:14px;border-color:#3a1113;background:linear-gradient(180deg,#170D0D,#141414)}
+  .insights-body{font-size:14.5px;line-height:1.65;color:#D8D8D8;white-space:pre-wrap}
+  .insights-body strong{color:var(--white)}
+  .regen{background:none;border:1px solid var(--line);color:var(--dim);border-radius:50%;width:26px;height:26px;cursor:pointer;font-size:14px;margin-left:auto}
+  .regen:hover{color:var(--text);border-color:var(--dim)}
+  footer{margin-top:30px;color:#555;font-size:12px;text-align:center;letter-spacing:.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>D<span class="dot">'</span>S HEALTH<span class="dot">.</span></h1>
+      <div class="sub">Nothing Watch · Health Connect</div>
+    </div>
+    <div class="status" id="status">No data loaded</div>
+  </header>
+
+  <div id="err"></div>
+
+  <div id="drop" role="button" tabindex="0" aria-label="Upload Health Connect export">
+    <div class="big">DROP HEALTH CONNECT EXPORT</div>
+    <div class="hint">.zip or .db — parsed on your device, nothing leaves this page</div>
+    <input type="file" id="file" accept=".zip,.db,application/zip">
+  </div>
+
+  <div id="dash" style="display:none">
+    <div class="cards" id="cards"></div>
+    <div class="toolbar">
+      <div class="ranges" id="ranges">
+        <button data-d="14">14D</button>
+        <button data-d="30" class="active">30D</button>
+        <button data-d="90">90D</button>
+        <button data-d="9999">ALL</button>
+      </div>
+      <button class="clear" id="clear">Clear saved data</button>
+    </div>
+    <div class="panel insights" id="insightsPanel">
+      <h2>AI insights <button class="regen" id="regen" title="Regenerate">↻</button></h2>
+      <div id="insights" class="insights-body">Loading insights…</div>
+    </div>
+    <div class="grid">
+      <div class="panel"><h2>Steps / day</h2><div class="chartbox"><canvas id="cSteps"></canvas></div></div>
+      <div class="panel"><h2>Resting heart rate</h2><div class="chartbox"><canvas id="cRhr"></canvas></div></div>
+      <div class="panel"><h2>Night sleep (hours)</h2><div class="chartbox"><canvas id="cSleep"></canvas></div></div>
+      <div class="panel"><h2>Blood oxygen (SpO2)</h2><div class="chartbox"><canvas id="cSpo2"></canvas></div></div>
+    </div>
+  </div>
+
+  <footer>Set Health Connect scheduled export to daily → drop the new file here to refresh</footer>
+</div>
+
+<script>
+/* ============ CONFIG — paste your Apps Script web app URL + secret ============ */
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzzwQeftfgnfbe_Tg-oZBqHY8mOaTAALpchKx0g506gV1t7-0gcsZohZmJy3LAhTv35rQ/exec';
+const SECRET = 'DharmHealthTrackAPI';
+const GEMINI_API_KEY = 'AQ.Ab8RN6KqnKJrtRoabGG78TN-gbOuTVdJTEBYAkwTyMP3rVrSpA'; // free at aistudio.google.com
+/* ============================================================================= */
+
+const $ = s => document.querySelector(s);
+const EPOCH = new Date(1970,0,1);
+const dayToDate = d => { const t = new Date(EPOCH); t.setDate(t.getDate()+d); return t; };
+const fmt = d => d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+let DATA = null, range = 30, charts = {};
+
+Chart.defaults.color = '#8A8A8A';
+Chart.defaults.borderColor = '#262626';
+Chart.defaults.font.family = "'Space Grotesk', sans-serif";
+
+function showErr(m){ const e=$('#err'); e.textContent=m; e.style.display='block'; setTimeout(()=>e.style.display='none',8000); }
+
+async function parseDb(buf){
+  const SQL = await initSqlJs({locateFile:f=>`https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${f}`});
+  const db = new SQL.Database(new Uint8Array(buf));
+  const q = sql => { try{ const r=db.exec(sql); return r.length?r[0].values:[]; }catch(e){ return []; } };
+
+  const steps = q("SELECT local_date, SUM(count) FROM steps_record_table GROUP BY local_date ORDER BY local_date");
+  const rhr   = q("SELECT local_date, ROUND(AVG(beats_per_minute),1) FROM resting_heart_rate_record_table GROUP BY local_date ORDER BY local_date");
+  const spo2  = q("SELECT local_date, ROUND(AVG(percentage),1) FROM oxygen_saturation_record_table GROUP BY local_date ORDER BY local_date");
+  // Main night sleep per day: longest session ending that local_date-ish; simpler: sum sessions >= 3h grouped by local_date
+  const sleepRows = q("SELECT local_date, start_time, end_time FROM sleep_session_record_table ORDER BY start_time");
+  const sleepByDay = {};
+  for(const [ld, st, et] of sleepRows){
+    const h = (et-st)/3600000;
+    if(h >= 3){ sleepByDay[ld] = Math.max(sleepByDay[ld]||0, h); }
+  }
+  const sleep = Object.entries(sleepByDay).map(([k,v])=>[+k, +v.toFixed(1)]).sort((a,b)=>a[0]-b[0]);
+  db.close();
+
+  if(!steps.length && !rhr.length) throw new Error("No Health Connect tables found in this database.");
+  return {
+    steps: steps.map(([d,v])=>[d,v]),
+    rhr:   rhr.map(([d,v])=>[d,v]),
+    spo2:  spo2.map(([d,v])=>[d,v]),
+    sleep,
+    exported: Date.now()
+  };
+}
+
+async function handleFile(file){
+  try{
+    $('#status').innerHTML = 'Parsing…';
+    let buf;
+    if(file.name.toLowerCase().endsWith('.zip')){
+      const zip = await JSZip.loadAsync(file);
+      const dbFile = Object.values(zip.files).find(f=>f.name.endsWith('.db'));
+      if(!dbFile) throw new Error("No .db file inside this zip. Export from Health Connect and try again.");
+      buf = await dbFile.async('arraybuffer');
+    } else {
+      buf = await file.arrayBuffer();
+    }
+    DATA = await parseDb(buf);
+    await store.set('hc-data', JSON.stringify(DATA));
+    render();
+  }catch(e){
+    $('#status').textContent = 'No data loaded';
+    showErr(e.message || 'Could not read this file.');
+  }
+}
+
+function slice(arr){
+  if(!arr.length) return [];
+  const maxDay = Math.max(...DATA.steps.concat(DATA.rhr).map(r=>r[0]));
+  return arr.filter(([d])=> d > maxDay - range);
+}
+
+function stat(label, value, unit, delta){
+  return `<div class="card"><div class="label">${label}</div>
+    <div class="value">${value}<span class="unit">${unit}</span></div>
+    ${delta?`<div class="delta ${delta.cls}">${delta.txt}</div>`:''}</div>`;
+}
+
+function render(){
+  if(!DATA) return;
+  $('#dash').style.display='block';
+  $('#drop').classList.add('compact');
+  $('#drop .big').textContent = 'UPDATE DATA';
+  $('#drop .hint').textContent = '— drop today\'s export';
+  const maxDay = Math.max(...DATA.steps.map(r=>r[0]));
+  $('#status').innerHTML = `Data through <b>${fmt(dayToDate(maxDay))}</b><br>Loaded ${new Date(DATA.exported).toLocaleDateString()}`;
+
+  // Stats
+  const last = a => a.length? a[a.length-1] : null;
+  const avg = a => a.length? a.reduce((s,r)=>s+ +r[1],0)/a.length : 0;
+  const s14 = DATA.steps.filter(([d])=>d>maxDay-14), sPrev = DATA.steps.filter(([d])=>d<=maxDay-14 && d>maxDay-28);
+  const stepDelta = sPrev.length? Math.round(avg(s14)-avg(sPrev)) : null;
+  const lastFull = DATA.steps.length>1 ? DATA.steps[DATA.steps.length-2] : last(DATA.steps);
+  const r7 = DATA.rhr.filter(([d])=>d>maxDay-7);
+  const sl7 = DATA.sleep.filter(([d])=>d>maxDay-7);
+  const sp7 = DATA.spo2.filter(([d])=>d>maxDay-7);
+
+  $('#cards').innerHTML =
+    stat('Latest full day', (lastFull? lastFull[1]:0).toLocaleString(), 'steps',
+      stepDelta!==null?{cls:stepDelta>=0?'up':'down',txt:(stepDelta>=0?'▲ +':'▼ ')+stepDelta.toLocaleString()+' vs prior 2wk avg'}:null) +
+    stat('Resting HR · 7d', r7.length? avg(r7).toFixed(0):'—','bpm',
+      {cls:'',txt: DATA.rhr.length? 'all-time '+avg(DATA.rhr).toFixed(0)+' bpm':''}) +
+    stat('Night sleep · 7d', sl7.length? avg(sl7).toFixed(1):'—','h',
+      {cls: avg(sl7)>=7?'up':'down', txt: avg(sl7)>=7?'On target':'Below 7h target'}) +
+    stat('SpO2 · 7d', sp7.length? avg(sp7).toFixed(1):'—','%',null);
+
+  drawCharts();
+  loadInsights();
+}
+
+/* ---------- Gemini AI insights ---------- */
+function summaryForAI(){
+  const maxDay = Math.max(...DATA.steps.map(r=>r[0]));
+  const win = (a,n) => a.filter(([d])=>d>maxDay-n).map(r=>+r[1]);
+  const avg = a => a.length? (a.reduce((s,v)=>s+v,0)/a.length) : null;
+  const r1 = x => x==null? null : Math.round(x*10)/10;
+  return {
+    period_end: dayToDate(maxDay).toDateString(),
+    steps: {avg7:r1(avg(win(DATA.steps,7))), avg30:r1(avg(win(DATA.steps,30))), last7:win(DATA.steps,7)},
+    resting_hr_bpm: {avg7:r1(avg(win(DATA.rhr,7))), avg30:r1(avg(win(DATA.rhr,30)))},
+    night_sleep_hours: {avg7:r1(avg(win(DATA.sleep,7))), avg30:r1(avg(win(DATA.sleep,30))), last7:win(DATA.sleep,7)},
+    spo2_pct: {avg7:r1(avg(win(DATA.spo2,7))), avg30:r1(avg(win(DATA.spo2,30)))}
+  };
+}
+
+async function loadInsights(force){
+  const box = $('#insights');
+  if(!GEMINI_API_KEY || GEMINI_API_KEY.indexOf('PASTE') === 0){
+    box.textContent = 'Add your free Gemini API key in CONFIG to enable insights (aistudio.google.com).';
+    return;
+  }
+  const maxDay = Math.max(...DATA.steps.map(r=>r[0]));
+  const cacheKey = 'hc-insights-' + maxDay;
+  if(!force){
+    try{ const c = await store.get(cacheKey); if(c && c.value){ box.innerHTML = c.value; return; } }catch(e){}
+  }
+  box.textContent = 'Analyzing your week…';
+  const prompt = `You are a concise health coach. Here is my wearable data summary (JSON): ${JSON.stringify(summaryForAI())}.
+Give me exactly 3 short insights comparing this week vs the 30-day baseline (steps, sleep, resting HR/SpO2) and 1 specific, actionable suggestion for tomorrow. Under 110 words total. Plain text, one line per point, start each line with "• ". No medical diagnoses.`;
+  try{
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=' + GEMINI_API_KEY, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.4, maxOutputTokens:250}})
+    });
+    const j = await res.json();
+    if(j.error) throw new Error(j.error.message);
+    const text = (j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
+    if(!text) throw new Error('Empty response');
+    const html = text.replace(/</g,'&lt;').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+    box.innerHTML = html;
+    await store.set(cacheKey, html);
+  }catch(e){
+    box.textContent = 'Insights unavailable: ' + e.message;
+  }
+}
+
+function drawCharts(){
+  const mk = (id, cfg) => { if(charts[id]) charts[id].destroy(); charts[id]=new Chart($(id), cfg); };
+  const labels = a => a.map(([d])=>fmt(dayToDate(d)));
+  const vals = a => a.map(r=>+r[1]);
+  const st = slice(DATA.steps), rh = slice(DATA.rhr), sl = slice(DATA.sleep), sp = slice(DATA.spo2);
+  const common = {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false},ticks:{maxTicksLimit:8}}, y:{grid:{color:'#1E1E1E'}}}};
+
+  mk('#cSteps',{type:'bar',data:{labels:labels(st),datasets:[{data:vals(st),backgroundColor:vals(st).map(v=>v>=10000?'#D71921':'#F2F2F2'),borderRadius:3,barPercentage:.7}]},options:common});
+  mk('#cRhr',{type:'line',data:{labels:labels(rh),datasets:[{data:vals(rh),borderColor:'#D71921',pointBackgroundColor:'#D71921',pointRadius:2.5,tension:.35,borderWidth:2}]},options:common});
+  mk('#cSleep',{type:'bar',data:{labels:labels(sl),datasets:[{data:vals(sl),backgroundColor:vals(sl).map(v=>v>=7?'#F2F2F2':'#D71921'),borderRadius:3,barPercentage:.7}]},options:{...common, scales:{...common.scales, y:{...common.scales.y, suggestedMax:9}}}});
+  mk('#cSpo2',{type:'line',data:{labels:labels(sp),datasets:[{data:vals(sp),borderColor:'#F2F2F2',pointRadius:2,tension:.3,borderWidth:2}]},options:{...common, scales:{...common.scales, y:{...common.scales.y, suggestedMin:94, suggestedMax:100}}}});
+}
+
+// events
+const drop = $('#drop'), fileInput = $('#file');
+drop.addEventListener('click', ()=>fileInput.click());
+drop.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' ') fileInput.click(); });
+fileInput.addEventListener('change', e=>{ if(e.target.files[0]) handleFile(e.target.files[0]); });
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop', e=>{ const f=e.dataTransfer.files[0]; if(f) handleFile(f); });
+
+$('#regen').addEventListener('click', ()=>{ if(DATA) loadInsights(true); });
+$('#ranges').addEventListener('click', e=>{
+  if(e.target.dataset.d){
+    range = +e.target.dataset.d;
+    document.querySelectorAll('#ranges button').forEach(b=>b.classList.toggle('active', b===e.target));
+    drawCharts();
+  }
+});
+$('#clear').addEventListener('click', async ()=>{
+  await store.del('hc-data');
+  location.reload();
+});
+
+// storage shim: window.storage inside Claude artifacts, localStorage on GitHub Pages
+const store = {
+  async get(k){ try{ return await window.storage.get(k); }catch(e){ const v=localStorage.getItem(k); return v?{value:v}:null; } },
+  async set(k,v){ try{ await window.storage.set(k,v); }catch(e){ try{ localStorage.setItem(k,v); }catch(_){} } },
+  async del(k){ try{ await window.storage.delete(k); }catch(e){ localStorage.removeItem(k); } }
+};
+
+async function autoFetch(){
+  if(!APPS_SCRIPT_URL || APPS_SCRIPT_URL.indexOf('http') !== 0) return false;
+  try{
+    $('#status').textContent = 'Fetching latest export…';
+    const res = await fetch(APPS_SCRIPT_URL + '?key=' + encodeURIComponent(SECRET));
+    const j = await res.json();
+    if(j.error) throw new Error(j.error);
+    const bin = Uint8Array.from(atob(j.content), c=>c.charCodeAt(0));
+    let buf = bin.buffer;
+    if(j.isZip){
+      const zip = await JSZip.loadAsync(buf);
+      const dbFile = Object.values(zip.files).find(f=>f.name.endsWith('.db'));
+      if(!dbFile) throw new Error('No .db inside the zip');
+      buf = await dbFile.async('arraybuffer');
+    }
+    DATA = await parseDb(buf);
+    DATA.sourceUpdated = j.updated;
+    await store.set('hc-data', JSON.stringify(DATA));
+    render();
+    return true;
+  }catch(e){
+    showErr('Auto-fetch failed: ' + e.message + ' — you can still drop a file manually.');
+    return false;
+  }
+}
+
+// load: cached first for instant paint, then refresh from Drive
+(async ()=>{
+  try{
+    const r = await store.get('hc-data');
+    if(r && r.value){ DATA = JSON.parse(r.value); render(); }
+  }catch(e){}
+  autoFetch();
+})();
+</script>
+</body>
+</html>
