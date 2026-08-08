@@ -183,9 +183,7 @@
 /* ============ CONFIG ============ */
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzzwQeftfgnfbe_Tg-oZBqHY8mOaTAALpchKx0g506gV1t7-0gcsZohZmJy3LAhTv35rQ/exec';
 const SECRET = 'DharmHealthTrackAPI';
-const GEMINI_API_KEY = 'AIzaSyAbpdxkm-7igMOGextbLeEbFk8oQ9R4rLc';
-// Tried in order — first one that works is remembered for the session
-const GEMINI_MODELS = ['gemini-3.5-flash','gemini-3-flash','gemini-3.1-flash-lite','gemini-2.5-flash'];
+// Gemini key now lives ONLY in Apps Script (Script Properties) — never in this page
 /* ---- Benchmarks (yellow lines) — tune to your goals ---- */
 const BENCH = {
   steps: 8000,      // WHO: ~8k steps/day for adults (India avg is ~4-5k — you're aiming higher)
@@ -204,7 +202,7 @@ const MOBILE = matchMedia('(max-width:600px)').matches;
 const EPOCH = new Date(1970,0,1);
 const dayToDate = d => { const t = new Date(EPOCH); t.setDate(t.getDate()+d); return t; };
 const fmt = d => d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
-let DATA = null, range = 30, charts = {}, workingModel = null;
+let DATA = null, range = 30, charts = {};
 
 Chart.defaults.color = '#8C8C8C';
 Chart.defaults.borderColor = '#272727';
@@ -472,55 +470,26 @@ function summaryForAI(){
   };
 }
 
-async function callGemini(prompt){
-  const models = workingModel ? [workingModel, ...GEMINI_MODELS.filter(m=>m!==workingModel)] : GEMINI_MODELS;
-  let lastErr = null;
-  for(const model of models){
-    try{
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.4, maxOutputTokens:350}})
-      });
-      const j = await res.json();
-      if(j.error){
-        // model not found / not supported -> try next; other errors (quota, key) -> stop
-        if(res.status===404 || /not found|not supported/i.test(j.error.message||'')){ lastErr=j.error.message; continue; }
-        throw new Error(j.error.message);
-      }
-      const text = (j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
-      if(!text){ lastErr='Empty response'; continue; }
-      workingModel = model;
-      return text;
-    }catch(e){ lastErr = e.message; if(!/not found|not supported|Empty/i.test(e.message)) throw e; }
-  }
-  throw new Error(lastErr || 'All models failed');
-}
-
 async function loadInsights(force){
   const box = $('#insights');
-  if(!GEMINI_API_KEY || GEMINI_API_KEY.indexOf('PASTE') === 0){
-    box.textContent = 'Add your free Gemini API key in CONFIG to enable insights.';
-    return;
-  }
   const maxDay = Math.max(...DATA.steps.map(r=>r[0]));
   const cacheKey = 'hc-insights-' + maxDay;
   if(!force){
     try{ const c = await store.get(cacheKey); if(c && c.value){ box.innerHTML = c.value; return; } }catch(e){}
   }
   box.textContent = 'Analyzing your week…';
-  const prompt = `You are a concise health coach. My wearable data summary (JSON): ${JSON.stringify(summaryForAI())}.
-My targets: ${JSON.stringify(BENCH)} (steps/day, resting HR bpm, sleep h, SpO2 %, active kcal, water L, healthy BMI).
-Give exactly 4 short insights comparing this week vs the 30-day baseline AND vs my targets (steps, sleep incl. stage quality, heart, activity/calories) and 1 specific actionable suggestion for tomorrow. Under 130 words total. Plain text, one line per point, each starting with "• ". No medical diagnoses.`;
   try{
-    const text = await callGemini(prompt);
-    const html = text.replace(/</g,'&lt;').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-    box.innerHTML = html;
-    await store.set(cacheKey, html);
+    const summary = {...summaryForAI(), targets: BENCH};
+    const url = APPS_SCRIPT_URL + '?key=' + encodeURIComponent(SECRET)
+      + '&action=insights&summary=' + encodeURIComponent(JSON.stringify(summary));
+    const res = await fetch(url);
+    const j = await res.json();
+    if(j.error) throw new Error(j.error);
+    const html2 = j.text.replace(/</g,'&lt;').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+    box.innerHTML = html2;
+    await store.set(cacheKey, html2);
   }catch(e){
-    let msg = e.message;
-    if(/OAuth|authentication credential/i.test(msg))
-      msg = 'Invalid API key — Gemini keys start with "AIza". Get one free: aistudio.google.com → Get API key.';
-    box.textContent = 'Insights unavailable: ' + msg;
+    box.textContent = 'Insights unavailable: ' + e.message;
   }
 }
 
