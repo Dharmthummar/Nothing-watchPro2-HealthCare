@@ -162,7 +162,7 @@
   <div id="dash" style="display:none">
     <div class="cards" id="cards"></div>
     <div class="panel insights">
-      <h2><span class="ai-badge">AI</span> Daily insights <button class="regen" id="regen" title="Regenerate">↻</button></h2>
+      <h2><span class="ai-badge">AI</span> Coach · <span id="insWin">30D</span> window <button class="regen" id="regen" title="Regenerate">↻</button></h2>
       <div id="insights" class="insights-body">Loading insights…</div>
     </div>
     <div class="toolbar">
@@ -454,38 +454,49 @@ function drawCharts(){
 /* ---------- Gemini AI insights (latest models + fallback) ---------- */
 function summaryForAI(){
   const maxDay = Math.max(...DATA.steps.map(r=>r[0]));
+  const totalDays = maxDay - Math.min(...DATA.steps.map(r=>r[0]));
   const win = (a,n) => (a||[]).filter(([d])=>d>maxDay-n).map(r=>+r[1]);
   const avg = a => a.length? a.reduce((s,v)=>s+v,0)/a.length : null;
   const r1 = x => x==null? null : Math.round(x*10)/10;
+  const N = Math.min(range, totalDays);
   const sg = DATA.stages, tot = sg.Light+sg.Deep+sg.REM+sg.Awake || 1;
+  const block = n => ({
+    steps_avg: r1(avg(win(DATA.steps,n))),
+    night_sleep_h_avg: r1(avg(win(DATA.sleep,n))),
+    resting_hr_avg: r1(avg(win(DATA.rhr,n))),
+    active_kcal_avg: r1(avg(win(DATA.cal,n))),
+    spo2_avg: r1(avg(win(DATA.spo2,n)))
+  });
   return {
     period_end: dayToDate(maxDay).toDateString(),
-    steps:{avg7:r1(avg(win(DATA.steps,7))), avg30:r1(avg(win(DATA.steps,30))), last7:win(DATA.steps,7)},
-    resting_hr_bpm:{avg7:r1(avg(win(DATA.rhr,7))), avg30:r1(avg(win(DATA.rhr,30)))},
-    night_sleep_hours:{avg7:r1(avg(win(DATA.sleep,7))), avg30:r1(avg(win(DATA.sleep,30))), last7:win(DATA.sleep,7)},
+    selected_window_days: N,
+    selected_period: block(N),
+    last_7_days: {...block(7), steps_each_day: win(DATA.steps,7), sleep_each_night: win(DATA.sleep,7)},
     sleep_stage_pct_30d:{light:r1(sg.Light/tot*100), deep:r1(sg.Deep/tot*100), rem:r1(sg.REM/tot*100)},
-    active_kcal:{avg7:r1(avg(win(DATA.cal,7))), avg30:r1(avg(win(DATA.cal,30)))},
-    spo2_pct:{avg7:r1(avg(win(DATA.spo2,7))), avg30:r1(avg(win(DATA.spo2,30)))},
-    water_l: DATA.hyd && DATA.hyd.length ? {avg7:r1(avg(win(DATA.hyd,7)))} : 'not tracked'
+    water_l: DATA.hyd && DATA.hyd.length ? {avg7:r1(avg(win(DATA.hyd,7)))} : 'not tracked',
+    targets: BENCH
   };
 }
 
 async function loadInsights(force){
   const box = $('#insights');
   const maxDay = Math.max(...DATA.steps.map(r=>r[0]));
-  const cacheKey = 'hc-insights-' + maxDay;
+  const cacheKey = 'hc-insights-' + maxDay + '-' + range;
   if(!force){
     try{ const c = await store.get(cacheKey); if(c && c.value){ box.innerHTML = c.value; return; } }catch(e){}
   }
-  box.textContent = 'Analyzing your week…';
+  const winEl = $('#insWin'); if(winEl) winEl.textContent = range>3650?'ALL':range+'D';
+  box.textContent = 'Analyzing your ' + (range>3650?'full history':range+'-day window') + '…';
   try{
-    const summary = {...summaryForAI(), targets: BENCH};
+    const summary = summaryForAI();
     const url = APPS_SCRIPT_URL + '?key=' + encodeURIComponent(SECRET)
       + '&action=insights&summary=' + encodeURIComponent(JSON.stringify(summary));
     const res = await fetch(url);
     const j = await res.json();
     if(j.error) throw new Error(j.error);
-    const html2 = j.text.replace(/</g,'&lt;').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+    const html2 = j.text.replace(/</g,'&lt;')
+      .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+      .replace(/^(INSIGHTS|FOOD|SCHEDULE)\s*:?/gm,'<strong>$1</strong>');
     box.innerHTML = html2;
     await store.set(cacheKey, html2);
   }catch(e){
@@ -501,6 +512,7 @@ $('#ranges').addEventListener('click', e=>{
     range = +e.target.dataset.d;
     document.querySelectorAll('#ranges button').forEach(b=>b.classList.toggle('active', b===e.target));
     drawCharts();
+    loadInsights();
   }
 });
 
